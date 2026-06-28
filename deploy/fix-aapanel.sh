@@ -9,27 +9,42 @@ echo "==> Fix deploy WhatsMeow di $APP_DIR"
 
 systemctl stop meow-gateway 2>/dev/null || true
 
-# Pastikan Go ada
+# Install Go jika belum ada
+install_go() {
+  GO_VER="1.26.4"
+  echo "==> Install Go ${GO_VER}..."
+  curl -fsSL "https://go.dev/dl/go${GO_VER}.linux-amd64.tar.gz" -o /tmp/go.tar.gz
+  rm -rf /usr/local/go
+  tar -C /usr/local -xzf /tmp/go.tar.gz
+  rm -f /tmp/go.tar.gz
+  export PATH="/usr/local/go/bin:$PATH"
+  grep -q '/usr/local/go/bin' /etc/profile 2>/dev/null || echo 'export PATH=$PATH:/usr/local/go/bin' >> /etc/profile
+}
+
 if ! command -v go &>/dev/null; then
-  if [ -d /usr/local/go/bin ]; then
+  if [ -x /usr/local/go/bin/go ]; then
     export PATH="/usr/local/go/bin:$PATH"
   else
-    echo "Install Go dulu:"
-    echo "  curl -fsSL https://go.dev/dl/go1.26.4.linux-amd64.tar.gz | tar -C /usr/local -xz"
-    echo "  export PATH=\$PATH:/usr/local/go/bin"
-    exit 1
+    install_go
   fi
 fi
 export PATH="/usr/local/go/bin:$PATH"
-echo "Go: $(go version)"
+echo "    Go: $(go version)"
 
-# Clone ke temp, sync ke folder site (abaikan .user.ini aaPanel)
-TMP=$(mktemp -d)
-git clone --depth 1 "$REPO" "$TMP"
-rsync -av --exclude '.user.ini' "$TMP/" "$APP_DIR/"
-rm -rf "$TMP"
+# Git safe.directory (fix dubious ownership aaPanel)
+git config --global --add safe.directory "$APP_DIR" 2>/dev/null || true
 
+# Pull source — fallback rsync jika git pull gagal
 cd "$APP_DIR"
+if [ -d ".git" ] && git pull origin main 2>/dev/null; then
+  echo "==> Git pull OK"
+else
+  echo "==> Git pull gagal, clone via temp..."
+  TMP=$(mktemp -d)
+  git clone --depth 1 "$REPO" "$TMP"
+  rsync -av --exclude '.user.ini' --exclude '.env' "$TMP/" "$APP_DIR/"
+  rm -rf "$TMP"
+fi
 
 # .env
 if [ ! -f .env ]; then
