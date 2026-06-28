@@ -44,6 +44,22 @@ Server berjalan di `http://localhost:8081` secara default.
 | `WEBHOOK_URL` | _(kosong)_ | URL webhook pesan masuk |
 | `LOG_LEVEL` | `INFO` | Level log |
 
+## Dokumentasi API
+
+Halaman dokumentasi interaktif tersedia di:
+
+```
+https://meow.solusijasa.com/docs
+```
+
+Halaman ini **dilindungi secret key**. Masukkan API key saat login, atau akses langsung:
+
+```
+https://meow.solusijasa.com/docs?key=YOUR_API_KEY
+```
+
+Session login docs berlaku 24 jam via cookie.
+
 ## Autentikasi
 
 Semua endpoint (kecuali `/health`) memerlukan API key via header:

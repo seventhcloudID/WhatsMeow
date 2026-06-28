@@ -8,7 +8,8 @@ import (
 func APIKeyMiddleware(apiKey string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.URL.Path == "/health" {
+			path := r.URL.Path
+			if path == "/health" || strings.HasPrefix(path, "/docs") {
 				next.ServeHTTP(w, r)
 				return
 			}

@@ -7,10 +7,15 @@ import (
 )
 
 func NewRouter(manager *wa.Manager, apiKey string) http.Handler {
-	h := NewHandler(manager)
+	h := NewHandler(manager, apiKey)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /health", h.Health)
+
+	mux.HandleFunc("GET /docs", h.Docs)
+	mux.HandleFunc("GET /docs/", h.Docs)
+	mux.HandleFunc("POST /docs/login", h.DocsLogin)
+	mux.HandleFunc("POST /docs/logout", h.DocsLogout)
 
 	mux.HandleFunc("GET /session/status", h.SessionStatus)
 	mux.HandleFunc("POST /session/connect", h.SessionConnect)

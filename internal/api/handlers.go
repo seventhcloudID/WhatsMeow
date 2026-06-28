@@ -9,11 +9,12 @@ import (
 )
 
 type Handler struct {
-	wa *wa.Manager
+	wa     *wa.Manager
+	apiKey string
 }
 
-func NewHandler(manager *wa.Manager) *Handler {
-	return &Handler{wa: manager}
+func NewHandler(manager *wa.Manager, apiKey string) *Handler {
+	return &Handler{wa: manager, apiKey: apiKey}
 }
 
 func (h *Handler) Health(w http.ResponseWriter, r *http.Request) {
