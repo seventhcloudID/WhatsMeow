@@ -73,6 +73,16 @@ func (h *Handler) SessionLogout(w http.ResponseWriter, r *http.Request) {
 	writeSuccess(w, map[string]string{"message": "logout berhasil"})
 }
 
+func (h *Handler) SessionReset(w http.ResponseWriter, r *http.Request) {
+	if err := h.wa.ResetSession(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeSuccess(w, map[string]string{
+		"message": "Session direset. Tunggu 5 detik lalu ambil QR baru via GET /session/qr",
+	})
+}
+
 func (h *Handler) SessionDisconnect(w http.ResponseWriter, r *http.Request) {
 	h.wa.Disconnect()
 	writeSuccess(w, map[string]string{"message": "disconnect berhasil"})

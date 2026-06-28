@@ -47,12 +47,14 @@ type Manager struct {
 	mu         sync.RWMutex
 	client     *whatsmeow.Client
 	container  *sqlstore.Container
+	dbPath     string
+	logLevel   string
 	webhookURL string
 	log        waLog.Logger
 
-	qrCode     string
-	qrTimeout  time.Duration
-	qrEvent    string
+	qrCode    string
+	qrTimeout time.Duration
+	qrEvent   string
 }
 
 func NewManager(dbPath, logLevel string) (*Manager, error) {
@@ -79,6 +81,8 @@ func NewManager(dbPath, logLevel string) (*Manager, error) {
 	m := &Manager{
 		client:    client,
 		container: container,
+		dbPath:    dbPath,
+		logLevel:  logLevel,
 		log:       clientLog,
 	}
 
@@ -101,7 +105,10 @@ func (m *Manager) GetWebhookURL() string {
 func (m *Manager) Start(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.startQRLocked(ctx)
+}
 
+func (m *Manager) startQRLocked(ctx context.Context) error {
 	if m.client.Store.ID != nil {
 		if m.client.IsConnected() {
 			return nil
@@ -124,6 +131,59 @@ func (m *Manager) Start(ctx context.Context) error {
 
 	go m.watchQR(qrChan)
 	return nil
+}
+
+// ResetSession hapus session lama dan buat QR baru (fix pairing gagal).
+func (m *Manager) ResetSession(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client.IsConnected() {
+		m.client.Disconnect()
+	}
+
+	if err := m.container.Close(); err != nil {
+		m.log.Warnf("close db: %v", err)
+	}
+
+	removeSQLiteFiles(m.dbPath)
+
+	if err := m.reinitClient(ctx); err != nil {
+		return fmt.Errorf("reinit client: %w", err)
+	}
+
+	return m.startQRLocked(ctx)
+}
+
+func (m *Manager) reinitClient(ctx context.Context) error {
+	dbLog := waLog.Stdout("Database", m.logLevel, true)
+	container, err := sqlstore.New(ctx, "sqlite", m.dbPath+"?_pragma=foreign_keys(1)", dbLog)
+	if err != nil {
+		return err
+	}
+
+	device, err := container.GetFirstDevice(ctx)
+	if err != nil {
+		return err
+	}
+
+	clientLog := waLog.Stdout("Client", m.logLevel, true)
+	client := whatsmeow.NewClient(device, clientLog)
+	client.AddEventHandler(m.eventHandler)
+
+	m.container = container
+	m.client = client
+	m.log = clientLog
+	m.qrCode = ""
+	m.qrEvent = ""
+	m.qrTimeout = 0
+	return nil
+}
+
+func removeSQLiteFiles(path string) {
+	for _, p := range []string{path, path + "-wal", path + "-shm"} {
+		_ = os.Remove(p)
+	}
 }
 
 func (m *Manager) watchQR(qrChan <-chan whatsmeow.QRChannelItem) {
@@ -178,8 +238,12 @@ func (m *Manager) GetQR() (*QRResponse, error) {
 	}
 
 	if m.qrCode == "" {
+		msg := m.qrEvent
+		if msg == "" {
+			msg = "waiting"
+		}
 		return &QRResponse{
-			Event: m.qrEvent,
+			Event: msg,
 		}, nil
 	}
 
@@ -205,13 +269,19 @@ func (m *Manager) PairPhone(ctx context.Context, phone string) (string, error) {
 	}
 
 	if !m.client.IsConnected() {
+		qrChan, err := m.client.GetQRChannel(ctx)
+		if err != nil {
+			return "", fmt.Errorf("get qr channel: %w (coba POST /session/reset dulu)", err)
+		}
+		go m.watchQR(qrChan)
 		if err := m.client.Connect(); err != nil {
 			return "", fmt.Errorf("connect: %w", err)
 		}
-		time.Sleep(2 * time.Second)
 	}
 
-	code, err := m.client.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Windows)")
+	time.Sleep(3 * time.Second)
+
+	code, err := m.client.PairPhone(ctx, phone, true, whatsmeow.PairClientChrome, "Chrome (Linux)")
 	if err != nil {
 		return "", fmt.Errorf("pair phone: %w", err)
 	}

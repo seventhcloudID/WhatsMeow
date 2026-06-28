@@ -22,6 +22,7 @@ func NewRouter(manager *wa.Manager, apiKey string) http.Handler {
 	mux.HandleFunc("GET /session/qr", h.SessionQR)
 	mux.HandleFunc("POST /session/pair", h.SessionPair)
 	mux.HandleFunc("POST /session/logout", h.SessionLogout)
+	mux.HandleFunc("POST /session/reset", h.SessionReset)
 	mux.HandleFunc("POST /session/disconnect", h.SessionDisconnect)
 
 	mux.HandleFunc("POST /message/text", h.SendText)
