@@ -425,16 +425,34 @@ func (m *Manager) eventHandler(rawEvt interface{}) {
 }
 
 func (m *Manager) handleIncomingMessage(evt *events.Message) {
+	// Gateway tertaut sebagai linked device, sehingga menerima SEMUA pesan yang
+	// diterima akun: DM pribadi, grup, status/story (broadcast), dan channel
+	// (newsletter). Untuk inbox CRM kita hanya teruskan DM pribadi dari orang lain.
+	if evt.Info.IsFromMe {
+		return
+	}
+	switch evt.Info.Chat.Server {
+	case types.DefaultUserServer, types.HiddenUserServer:
+		// DM pribadi (nomor "@s.whatsapp.net" atau "@lid") — diteruskan.
+	default:
+		// Grup (g.us), status/broadcast, newsletter, hosted, dll — diabaikan.
+		return
+	}
+
 	text := extractMessageText(evt)
+	sender := m.resolveSenderIdentity(evt)
 	payload := map[string]interface{}{
-		"message_id": evt.Info.ID,
-		"from":       evt.Info.Sender.String(),
-		"chat":       evt.Info.Chat.String(),
-		"timestamp":  evt.Info.Timestamp,
-		"push_name":  evt.Info.PushName,
-		"is_group":   evt.Info.IsGroup,
-		"media_type": evt.Info.MediaType,
-		"text":       text,
+		"message_id":   evt.Info.ID,
+		"from":         evt.Info.Sender.String(),
+		"from_phone":   sender.phone,
+		"chat":         evt.Info.Chat.String(),
+		"timestamp":    evt.Info.Timestamp,
+		"push_name":    evt.Info.PushName,
+		"contact_name": sender.name,
+		"is_group":     false,
+		"is_from_me":   false,
+		"media_type":   evt.Info.MediaType,
+		"text":         text,
 	}
 	if evt.Message.GetImageMessage() != nil {
 		payload["media_type"] = "image"
@@ -452,8 +470,91 @@ func (m *Manager) handleIncomingMessage(evt *events.Message) {
 		payload["media_type"] = "contact"
 	}
 
-	m.log.Infof("Pesan masuk dari %s: %s", evt.Info.Sender, text)
+	logName := sender.name
+	logFrom := evt.Info.Sender.String()
+	if sender.phone != "" {
+		logFrom = sender.phone
+	}
+	if logName != "" {
+		m.log.Infof("Pesan masuk dari %s (%s): %s", logName, logFrom, text)
+	} else {
+		m.log.Infof("Pesan masuk dari %s: %s", logFrom, text)
+	}
 	m.sendWebhook("message.received", payload)
+}
+
+// senderIdentity berisi identitas pengirim yang sudah di-resolve dari berbagai
+// sumber di session store (peta LID->PN dan buku kontak WA).
+type senderIdentity struct {
+	phone string // nomor telepon digit (mis. "628123456789"); kosong bila "ID privasi"
+	name  string // nama tampilan terbaik (buku kontak WA, fallback push name)
+}
+
+// resolveSenderIdentity meniru cara wafin-chatbot melengkapi data kontak:
+//   - Nomor: dari alamat PN langsung, SenderAlt, atau peta LID->PN whatsmeow
+//     (tabel whatsmeow_lid_map). Kosong hanya bila kontak benar-benar "ID privasi".
+//   - Nama: dari buku kontak WA (tabel whatsmeow_contacts: full/first/business name),
+//     dengan cross-reference JID LID maupun PN, fallback ke push name pesan.
+func (m *Manager) resolveSenderIdentity(evt *events.Message) senderIdentity {
+	from := evt.Info.Sender
+
+	// Tentukan JID nomor (PN) bila memungkinkan.
+	var pnJID types.JID
+	if from.Server == types.DefaultUserServer {
+		pnJID = from
+	} else if alt := evt.Info.SenderAlt; alt.Server == types.DefaultUserServer {
+		pnJID = alt
+	}
+
+	m.mu.RLock()
+	client := m.client
+	m.mu.RUnlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Resolve PN lewat peta LID->PN bila belum dapat & pengirim memakai LID.
+	if pnJID.IsEmpty() && from.Server == types.HiddenUserServer &&
+		client != nil && client.Store != nil && client.Store.LIDs != nil {
+		if pn, err := client.Store.LIDs.GetPNForLID(ctx, from); err == nil && pn.Server == types.DefaultUserServer {
+			pnJID = pn
+		}
+	}
+
+	id := senderIdentity{}
+	if !pnJID.IsEmpty() {
+		id.phone = pnJID.User
+	}
+
+	// Nama dari buku kontak WA: coba JID pengirim (LID) lalu JID nomor (PN).
+	if client != nil && client.Store != nil && client.Store.Contacts != nil {
+		for _, jid := range []types.JID{from, pnJID} {
+			if jid.IsEmpty() {
+				continue
+			}
+			info, err := client.Store.Contacts.GetContact(ctx, jid)
+			if err != nil || !info.Found {
+				continue
+			}
+			if name := firstNonEmpty(info.FullName, info.FirstName, info.BusinessName, info.PushName); name != "" {
+				id.name = name
+				break
+			}
+		}
+	}
+	if id.name == "" {
+		id.name = strings.TrimSpace(evt.Info.PushName)
+	}
+	return id
+}
+
+func firstNonEmpty(vals ...string) string {
+	for _, v := range vals {
+		if s := strings.TrimSpace(v); s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 func (m *Manager) sendWebhook(event string, data interface{}) {
