@@ -4,7 +4,11 @@ func apiEndpoints() []map[string]string {
 	return []map[string]string{
 		// Session
 		{"method": "GET", "path": "/health", "desc": "Health check"},
-		{"method": "GET", "path": "/session/status", "desc": "Status session"},
+		// Sessions (multi-tenant). Pilih tenant via header X-Session-ID di semua endpoint lain.
+		{"method": "GET", "path": "/sessions", "desc": "List semua session"},
+		{"method": "POST", "path": "/sessions", "desc": "Buat session {id,label}"},
+		{"method": "DELETE", "path": "/sessions/{id}", "desc": "Hapus session"},
+		{"method": "GET", "path": "/session/status", "desc": "Status session (header X-Session-ID)"},
 		{"method": "POST", "path": "/session/connect", "desc": "Connect WhatsApp"},
 		{"method": "GET", "path": "/session/qr", "desc": "QR code login"},
 		{"method": "POST", "path": "/session/pair", "desc": "Pairing code login"},

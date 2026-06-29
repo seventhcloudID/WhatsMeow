@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,22 +22,26 @@ func main() {
 	_ = godotenv.Overload()
 
 	cfg := config.Load()
-
-	manager, err := wa.NewManager(cfg.DBPath, cfg.LogLevel)
-	if err != nil {
-		log.Fatalf("init whatsapp: %v", err)
-	}
-
-	if cfg.WebhookURL != "" {
-		manager.SetWebhookURL(cfg.WebhookURL)
-	}
-
 	ctx := context.Background()
-	if err := manager.Start(ctx); err != nil {
-		log.Printf("warning: auto-connect gagal: %v", err)
+
+	sessionsDir := filepath.Join(filepath.Dir(cfg.DBPath), "sessions")
+	sessions, err := wa.NewSessionManager(sessionsDir, cfg.LogLevel)
+	if err != nil {
+		log.Fatalf("init sessions: %v", err)
 	}
 
-	router := api.NewRouter(manager, cfg.APIKey)
+	if err := sessions.Load(ctx); err != nil {
+		log.Printf("warning: load sessions gagal: %v", err)
+	}
+
+	// WEBHOOK_URL dari .env diterapkan ke session default (kompat single-tenant).
+	if cfg.WebhookURL != "" {
+		if err := sessions.SetWebhook(wa.DefaultSessionID, cfg.WebhookURL); err != nil {
+			log.Printf("warning: set webhook default gagal: %v", err)
+		}
+	}
+
+	router := api.NewRouter(sessions, cfg.APIKey)
 	addr := fmt.Sprintf(":%d", cfg.Port)
 
 	server := &http.Server{
@@ -61,7 +66,7 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	manager.Disconnect()
+	sessions.CloseAll()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown error: %v", err)
 	}

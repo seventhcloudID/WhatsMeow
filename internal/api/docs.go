@@ -250,6 +250,14 @@ const docsPageTemplate = `<!DOCTYPE html>
   <pre>X-API-Key: YOUR_SECRET_KEY</pre>
   <p>Alternatif:</p>
   <pre>Authorization: Bearer YOUR_SECRET_KEY</pre>
+  <h3 style="margin-top:1rem">Multi-session (multi-tenant)</h3>
+  <p>Satu gateway bisa melayani banyak nomor WhatsApp. Pilih tenant dengan header opsional:</p>
+  <pre>X-Session-ID: nama-tenant</pre>
+  <p>Tanpa header ini, dipakai session <code>default</code>. Semua endpoint session/message/groups/users/dst berlaku untuk session pada header tersebut. Kelola daftar tenant lewat endpoint <code>/sessions</code>:</p>
+  <pre>curl -H "X-API-Key: KEY" {BASE}/sessions
+curl -X POST -H "X-API-Key: KEY" -d '{"id":"tenant-1","label":"Toko A"}' {BASE}/sessions
+curl -X DELETE -H "X-API-Key: KEY" {BASE}/sessions/tenant-1</pre>
+  <p>Webhook diset per-session: kirim <code>PUT /webhook</code> dengan header <code>X-Session-ID</code> tenant tersebut. Payload webhook menyertakan field <code>session_id</code> agar penerima tahu asal pesannya.</p>
   <p>Format nomor tujuan: <code>6281234567890</code> (kode negara, tanpa <code>+</code>) atau JID penuh <code>628...@s.whatsapp.net</code>. JID grup berakhiran <code>@g.us</code>, channel/newsletter <code>@newsletter</code>.</p>
 </section>
 

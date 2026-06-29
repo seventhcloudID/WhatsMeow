@@ -43,6 +43,7 @@ type SendResult struct {
 
 type Manager struct {
 	mu         sync.RWMutex
+	id         string
 	client     *whatsmeow.Client
 	container  *sqlstore.Container
 	dbPath     string
@@ -55,15 +56,23 @@ type Manager struct {
 	qrEvent   string
 }
 
-func NewManager(dbPath, logLevel string) (*Manager, error) {
+// sqliteDSN menambahkan pragma penting agar SQLite tidak kena
+// "database is locked" (SQLITE_BUSY) saat whatsmeow menulis banyak data
+// sekaligus (identity, prekey, app state). busy_timeout = tunggu lock,
+// journal_mode WAL = pembaca tidak memblokir penulis.
+func sqliteDSN(path string) string {
+	return path + "?_pragma=foreign_keys(1)&_pragma=busy_timeout(10000)&_pragma=journal_mode(WAL)"
+}
+
+func NewManager(id, dbPath, logLevel string) (*Manager, error) {
 	if err := os.MkdirAll(filepath.Dir(dbPath), 0755); err != nil {
 		return nil, fmt.Errorf("create data dir: %w", err)
 	}
 
-	dbLog := waLog.Stdout("Database", logLevel, true)
+	dbLog := waLog.Stdout("Database["+id+"]", logLevel, true)
 	ctx := context.Background()
 
-	container, err := sqlstore.New(ctx, "sqlite", dbPath+"?_pragma=foreign_keys(1)", dbLog)
+	container, err := sqlstore.New(ctx, "sqlite", sqliteDSN(dbPath), dbLog)
 	if err != nil {
 		return nil, fmt.Errorf("init database: %w", err)
 	}
@@ -73,10 +82,11 @@ func NewManager(dbPath, logLevel string) (*Manager, error) {
 		return nil, fmt.Errorf("get device: %w", err)
 	}
 
-	clientLog := waLog.Stdout("Client", logLevel, true)
+	clientLog := waLog.Stdout("Client["+id+"]", logLevel, true)
 	client := whatsmeow.NewClient(device, clientLog)
 
 	m := &Manager{
+		id:        id,
 		client:    client,
 		container: container,
 		dbPath:    dbPath,
@@ -86,6 +96,28 @@ func NewManager(dbPath, logLevel string) (*Manager, error) {
 
 	client.AddEventHandler(m.eventHandler)
 	return m, nil
+}
+
+// ID mengembalikan id session tenant ini.
+func (m *Manager) ID() string { return m.id }
+
+// Close memutus, logout (bila masih login), dan menutup DB. Dipakai saat
+// session dihapus.
+func (m *Manager) Close(ctx context.Context) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.client != nil {
+		if m.client.Store.ID != nil {
+			_ = m.client.Logout(ctx)
+		}
+		if m.client.IsConnected() {
+			m.client.Disconnect()
+		}
+	}
+	if m.container != nil {
+		_ = m.container.Close()
+	}
 }
 
 func (m *Manager) SetWebhookURL(url string) {
@@ -118,7 +150,11 @@ func (m *Manager) startQRLocked(ctx context.Context) error {
 		return nil
 	}
 
-	qrChan, err := m.client.GetQRChannel(ctx)
+	// PENTING: masa hidup login QR TIDAK boleh terikat context request HTTP.
+	// Kalau pakai ctx request, begitu request /session/connect selesai context
+	// dibatalkan -> whatsmeow membatalkan login & memutus koneksi (~2 detik),
+	// sehingga QR yang discan tak pernah tuntas. Pakai background context.
+	qrChan, err := m.client.GetQRChannel(context.Background())
 	if err != nil {
 		return fmt.Errorf("get qr channel: %w", err)
 	}
@@ -131,22 +167,29 @@ func (m *Manager) startQRLocked(ctx context.Context) error {
 	return nil
 }
 
+// resetLocked memutus koneksi, menutup & MENGHAPUS file DB session, lalu
+// membuat client baru dari device kosong. Dipakai bersama oleh reset, logout,
+// dan saat device dilepas dari HP, agar state benar-benar bersih dan client
+// baru siap untuk penautan ulang. Pemanggil WAJIB memegang m.mu.
+func (m *Manager) resetLocked() error {
+	if m.client != nil && m.client.IsConnected() {
+		m.client.Disconnect()
+	}
+	if m.container != nil {
+		if err := m.container.Close(); err != nil {
+			m.log.Warnf("close db: %v", err)
+		}
+	}
+	removeSQLiteFiles(m.dbPath)
+	return m.reinitClient(context.Background())
+}
+
 // ResetSession hapus session lama dan buat QR baru (fix pairing gagal).
 func (m *Manager) ResetSession(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	if m.client.IsConnected() {
-		m.client.Disconnect()
-	}
-
-	if err := m.container.Close(); err != nil {
-		m.log.Warnf("close db: %v", err)
-	}
-
-	removeSQLiteFiles(m.dbPath)
-
-	if err := m.reinitClient(ctx); err != nil {
+	if err := m.resetLocked(); err != nil {
 		return fmt.Errorf("reinit client: %w", err)
 	}
 
@@ -154,8 +197,8 @@ func (m *Manager) ResetSession(ctx context.Context) error {
 }
 
 func (m *Manager) reinitClient(ctx context.Context) error {
-	dbLog := waLog.Stdout("Database", m.logLevel, true)
-	container, err := sqlstore.New(ctx, "sqlite", m.dbPath+"?_pragma=foreign_keys(1)", dbLog)
+	dbLog := waLog.Stdout("Database["+m.id+"]", m.logLevel, true)
+	container, err := sqlstore.New(ctx, "sqlite", sqliteDSN(m.dbPath), dbLog)
 	if err != nil {
 		return err
 	}
@@ -165,7 +208,7 @@ func (m *Manager) reinitClient(ctx context.Context) error {
 		return err
 	}
 
-	clientLog := waLog.Stdout("Client", m.logLevel, true)
+	clientLog := waLog.Stdout("Client["+m.id+"]", m.logLevel, true)
 	client := whatsmeow.NewClient(device, clientLog)
 	client.AddEventHandler(m.eventHandler)
 
@@ -267,7 +310,8 @@ func (m *Manager) PairPhone(ctx context.Context, phone string) (string, error) {
 	}
 
 	if !m.client.IsConnected() {
-		qrChan, err := m.client.GetQRChannel(ctx)
+		// Background context: koneksi pairing harus bertahan setelah request selesai.
+		qrChan, err := m.client.GetQRChannel(context.Background())
 		if err != nil {
 			return "", fmt.Errorf("get qr channel: %w (coba POST /session/reset dulu)", err)
 		}
@@ -311,11 +355,18 @@ func (m *Manager) Logout(ctx context.Context) error {
 		return fmt.Errorf("belum login")
 	}
 
+	// Beritahu WhatsApp untuk melepas device (best-effort). client.Logout TIDAK
+	// memancarkan event LoggedOut, jadi pembersihan state lokal harus dilakukan
+	// manual di bawah.
 	if err := m.client.Logout(ctx); err != nil {
-		return fmt.Errorf("logout: %w", err)
+		m.log.Warnf("logout ke WhatsApp gagal (tetap bersihkan state lokal): %v", err)
 	}
 
-	m.client.Disconnect()
+	// Hapus DB session & buat client baru agar siap tautkan ulang (tanpa ini,
+	// store ditandai Deleted dan /session/connect berikutnya gagal 500).
+	if err := m.resetLocked(); err != nil {
+		return fmt.Errorf("bersihkan session: %w", err)
+	}
 	return nil
 }
 
@@ -343,6 +394,19 @@ func (m *Manager) autoReconnect() {
 	}
 }
 
+// handleLoggedOut dipanggil saat WhatsApp melepas device (mis. "logged out from
+// another device"). Tanpa ini, client lama nyangkut dan /session/connect gagal
+// (500) karena GetQRChannel menolak. Di sini kita bersihkan & buat client baru
+// dari device kosong, sehingga connect berikutnya bisa memunculkan QR baru.
+func (m *Manager) handleLoggedOut() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if err := m.resetLocked(); err != nil {
+		m.log.Errorf("reset setelah logout: %v", err)
+	}
+}
+
 func (m *Manager) eventHandler(rawEvt interface{}) {
 	switch evt := rawEvt.(type) {
 	case *events.Message:
@@ -353,7 +417,8 @@ func (m *Manager) eventHandler(rawEvt interface{}) {
 		m.log.Warnf("Terputus dari WhatsApp")
 		go m.autoReconnect()
 	case *events.LoggedOut:
-		m.log.Warnf("Logout: %s", evt.Reason)
+		m.log.Warnf("Logout: %s (membersihkan & reinit client agar bisa tautkan ulang)", evt.Reason)
+		go m.handleLoggedOut()
 	case *events.PairSuccess:
 		m.log.Infof("Pairing berhasil: %s", evt.ID)
 	}
@@ -401,9 +466,10 @@ func (m *Manager) sendWebhook(event string, data interface{}) {
 	}
 
 	body, err := json.Marshal(map[string]interface{}{
-		"event":     event,
-		"timestamp": time.Now(),
-		"data":      data,
+		"event":      event,
+		"session_id": m.id,
+		"timestamp":  time.Now(),
+		"data":       data,
 	})
 	if err != nil {
 		m.log.Errorf("marshal webhook: %v", err)

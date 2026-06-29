@@ -4,10 +4,11 @@ REST API server / WhatsApp gateway berbasis [whatsmeow](https://github.com/tulir
 
 ## Fitur
 
+- **Multi-session / multi-tenant**: satu gateway melayani banyak nomor WhatsApp (pilih via header `X-Session-ID`)
 - Login via **QR Code** atau **Pairing Code** (nomor telepon)
 - Kirim pesan **teks**, **gambar**, dan **dokumen**
-- Webhook untuk pesan masuk
-- Session persisten (SQLite)
+- Webhook untuk pesan masuk (per-session)
+- Session persisten (SQLite, satu file per tenant)
 - Autentikasi API Key
 
 ## Persyaratan
@@ -40,8 +41,8 @@ Server berjalan di `http://localhost:8081` secara default.
 |----------|---------|------------|
 | `PORT` | `8081` | Port HTTP server |
 | `API_KEY` | `changeme` | API key untuk autentikasi |
-| `DB_PATH` | `data/session.db` | Path database session |
-| `WEBHOOK_URL` | _(kosong)_ | URL webhook pesan masuk |
+| `DB_PATH` | `data/session.db` | Basis path DB; folder-nya dipakai untuk `data/sessions/<id>.db` per tenant |
+| `WEBHOOK_URL` | _(kosong)_ | URL webhook pesan masuk untuk session `default` |
 | `LOG_LEVEL` | `INFO` | Level log |
 
 ## API Lengkap
@@ -56,6 +57,7 @@ curl -H "X-API-Key: KEY" https://meow.solusijasa.com/api/endpoints
 
 | Kategori | Endpoint |
 |----------|----------|
+| **Sessions** | `/sessions` (list/create), `/sessions/{id}` (delete) — header `X-Session-ID` untuk pilih tenant |
 | **Session** | `/session/status`, `/connect`, `/qr`, `/pair`, `/reset`, `/logout` |
 | **Pesan** | `/message/text`, `/image`, `/video`, `/audio`, `/document`, `/sticker`, `/location`, `/contact`, `/poll`, `/reaction`, `/revoke`, `/edit` |
 | **Grup** | `/groups`, `/groups/info`, `/groups/join`, `/groups/participants`, dll. |
@@ -94,6 +96,34 @@ atau:
 
 ```
 Authorization: Bearer your-secret-api-key
+```
+
+## Multi-Session (Multi-Tenant)
+
+Satu gateway bisa memegang banyak nomor WhatsApp sekaligus. Pilih tenant dengan header **opsional**:
+
+```
+X-Session-ID: nama-tenant
+```
+
+Tanpa header ini dipakai session `default` (kompatibel dengan pemakaian lama). Semua endpoint `/session/*`, `/message/*`, `/groups/*`, dst berlaku untuk session pada header tersebut. Webhook diset **per-session**, dan payload webhook menyertakan `session_id`.
+
+| Method | Endpoint | Keterangan |
+|--------|----------|------------|
+| GET | `/sessions` | Daftar semua session + status |
+| POST | `/sessions` | Buat session baru `{"id":"tenant-1","label":"Toko A"}` |
+| DELETE | `/sessions/{id}` | Hapus session (logout + hapus DB-nya) |
+
+```bash
+# Buat session baru
+curl -X POST -H "X-API-Key: changeme" \
+  -H "Content-Type: application/json" \
+  -d '{"id":"tenant-1","label":"Toko A"}' \
+  http://localhost:8081/sessions
+
+# Cek status nomor untuk tenant-1
+curl -H "X-API-Key: changeme" -H "X-Session-ID: tenant-1" \
+  http://localhost:8081/session/status
 ```
 
 ## API Endpoints
@@ -189,6 +219,7 @@ Payload webhook:
 ```json
 {
   "event": "message.received",
+  "session_id": "default",
   "timestamp": "2026-06-28T10:00:00Z",
   "data": {
     "message_id": "ABC123",
@@ -216,7 +247,9 @@ WhatsMeow/
 │   ├── config/             # Konfigurasi environment
 │   ├── wa/                 # WhatsApp client (whatsmeow)
 │   └── api/                # REST API handlers & router
-├── data/                   # Session database (auto-created)
+├── data/
+│   ├── sessions.json       # Metadata tiap session (id, label, webhook)
+│   └── sessions/           # DB SQLite per tenant: <id>.db (auto-created)
 ├── .env.example
 └── README.md
 ```
@@ -224,8 +257,9 @@ WhatsMeow/
 ## Catatan
 
 - WhatsApp Web multi-device API tidak resmi — gunakan dengan risiko sendiri.
-- Jangan commit file `.env` atau `data/session.db`.
+- Jangan commit file `.env` atau folder `data/` (berisi session & `sessions.json`).
 - Ganti `API_KEY` default sebelum deploy ke production.
+- Jalankan **satu** proses gateway saja; tiap tenant sudah punya DB terpisah sehingga tidak saling mengunci.
 
 ## Lisensi
 
