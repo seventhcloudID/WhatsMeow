@@ -13,10 +13,8 @@ import (
 
 	_ "modernc.org/sqlite"
 	"github.com/skip2/go-qrcode"
-	"google.golang.org/protobuf/proto"
 
 	"go.mau.fi/whatsmeow"
-	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
@@ -321,133 +319,6 @@ func (m *Manager) Logout(ctx context.Context) error {
 	return nil
 }
 
-func (m *Manager) SendText(ctx context.Context, to, text string) (*SendResult, error) {
-	jid, err := parseRecipient(to)
-	if err != nil {
-		return nil, err
-	}
-
-	m.mu.RLock()
-	client := m.client
-	m.mu.RUnlock()
-
-	if client.Store.ID == nil {
-		return nil, fmt.Errorf("belum login")
-	}
-	if !client.IsConnected() {
-		return nil, fmt.Errorf("tidak terhubung ke WhatsApp")
-	}
-
-	msg := &waProto.Message{
-		Conversation: proto.String(text),
-	}
-
-	resp, err := client.SendMessage(ctx, jid, msg)
-	if err != nil {
-		return nil, fmt.Errorf("send message: %w", err)
-	}
-
-	return &SendResult{
-		MessageID: resp.ID,
-		Timestamp: resp.Timestamp,
-	}, nil
-}
-
-func (m *Manager) SendImage(ctx context.Context, to string, data []byte, caption string) (*SendResult, error) {
-	jid, err := parseRecipient(to)
-	if err != nil {
-		return nil, err
-	}
-
-	m.mu.RLock()
-	client := m.client
-	m.mu.RUnlock()
-
-	if client.Store.ID == nil {
-		return nil, fmt.Errorf("belum login")
-	}
-	if !client.IsConnected() {
-		return nil, fmt.Errorf("tidak terhubung ke WhatsApp")
-	}
-
-	uploaded, err := client.Upload(ctx, data, whatsmeow.MediaImage)
-	if err != nil {
-		return nil, fmt.Errorf("upload image: %w", err)
-	}
-
-	msg := &waProto.Message{ImageMessage: &waProto.ImageMessage{
-		Caption:       proto.String(caption),
-		URL:           proto.String(uploaded.URL),
-		DirectPath:    proto.String(uploaded.DirectPath),
-		MediaKey:      uploaded.MediaKey,
-		Mimetype:      proto.String(http.DetectContentType(data)),
-		FileEncSHA256: uploaded.FileEncSHA256,
-		FileSHA256:    uploaded.FileSHA256,
-		FileLength:    proto.Uint64(uint64(len(data))),
-	}}
-
-	resp, err := client.SendMessage(ctx, jid, msg)
-	if err != nil {
-		return nil, fmt.Errorf("send image: %w", err)
-	}
-
-	return &SendResult{
-		MessageID: resp.ID,
-		Timestamp: resp.Timestamp,
-	}, nil
-}
-
-func (m *Manager) SendDocument(ctx context.Context, to string, data []byte, filename, mimetype string) (*SendResult, error) {
-	jid, err := parseRecipient(to)
-	if err != nil {
-		return nil, err
-	}
-
-	m.mu.RLock()
-	client := m.client
-	m.mu.RUnlock()
-
-	if client.Store.ID == nil {
-		return nil, fmt.Errorf("belum login")
-	}
-	if !client.IsConnected() {
-		return nil, fmt.Errorf("tidak terhubung ke WhatsApp")
-	}
-
-	if mimetype == "" {
-		mimetype = http.DetectContentType(data)
-	}
-	if filename == "" {
-		filename = "document"
-	}
-
-	uploaded, err := client.Upload(ctx, data, whatsmeow.MediaDocument)
-	if err != nil {
-		return nil, fmt.Errorf("upload document: %w", err)
-	}
-
-	msg := &waProto.Message{DocumentMessage: &waProto.DocumentMessage{
-		URL:           proto.String(uploaded.URL),
-		DirectPath:    proto.String(uploaded.DirectPath),
-		MediaKey:      uploaded.MediaKey,
-		Mimetype:      proto.String(mimetype),
-		FileEncSHA256: uploaded.FileEncSHA256,
-		FileSHA256:    uploaded.FileSHA256,
-		FileLength:    proto.Uint64(uint64(len(data))),
-		FileName:      proto.String(filename),
-	}}
-
-	resp, err := client.SendMessage(ctx, jid, msg)
-	if err != nil {
-		return nil, fmt.Errorf("send document: %w", err)
-	}
-
-	return &SendResult{
-		MessageID: resp.ID,
-		Timestamp: resp.Timestamp,
-	}, nil
-}
-
 func (m *Manager) autoReconnect() {
 	m.mu.RLock()
 	loggedIn := m.client.Store.ID != nil
@@ -497,7 +368,23 @@ func (m *Manager) handleIncomingMessage(evt *events.Message) {
 		"timestamp":  evt.Info.Timestamp,
 		"push_name":  evt.Info.PushName,
 		"is_group":   evt.Info.IsGroup,
+		"media_type": evt.Info.MediaType,
 		"text":       text,
+	}
+	if evt.Message.GetImageMessage() != nil {
+		payload["media_type"] = "image"
+	} else if evt.Message.GetVideoMessage() != nil {
+		payload["media_type"] = "video"
+	} else if evt.Message.GetAudioMessage() != nil {
+		payload["media_type"] = "audio"
+	} else if evt.Message.GetDocumentMessage() != nil {
+		payload["media_type"] = "document"
+	} else if evt.Message.GetStickerMessage() != nil {
+		payload["media_type"] = "sticker"
+	} else if evt.Message.GetLocationMessage() != nil {
+		payload["media_type"] = "location"
+	} else if evt.Message.GetContactMessage() != nil {
+		payload["media_type"] = "contact"
 	}
 
 	m.log.Infof("Pesan masuk dari %s: %s", evt.Info.Sender, text)

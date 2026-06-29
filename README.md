@@ -44,6 +44,28 @@ Server berjalan di `http://localhost:8081` secara default.
 | `WEBHOOK_URL` | _(kosong)_ | URL webhook pesan masuk |
 | `LOG_LEVEL` | `INFO` | Level log |
 
+## API Lengkap
+
+Gateway expose **50+ endpoint** REST yang wrap fitur whatsmeow. Daftar lengkap:
+
+```bash
+curl -H "X-API-Key: KEY" https://meow.solusijasa.com/api/endpoints
+```
+
+### Kategori endpoint
+
+| Kategori | Endpoint |
+|----------|----------|
+| **Session** | `/session/status`, `/connect`, `/qr`, `/pair`, `/reset`, `/logout` |
+| **Pesan** | `/message/text`, `/image`, `/video`, `/audio`, `/document`, `/sticker`, `/location`, `/contact`, `/poll`, `/reaction`, `/revoke`, `/edit` |
+| **Grup** | `/groups`, `/groups/info`, `/groups/join`, `/groups/participants`, dll. |
+| **User** | `/users/check`, `/users/info`, `/users/profile-picture`, `/users/blocklist` |
+| **Presence** | `/presence`, `/presence/typing`, `/presence/subscribe` |
+| **Chat** | `/chats/read`, `/chats/action` (mute/archive/pin) |
+| **Media** | `/media/download` |
+| **Newsletter** | `/newsletters`, `/newsletters/follow`, `/newsletters/messages` |
+| **Webhook** | `/webhook` |
+
 ## Dokumentasi API
 
 Halaman dokumentasi interaktif tersedia di:

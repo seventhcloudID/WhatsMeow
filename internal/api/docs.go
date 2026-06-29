@@ -217,6 +217,7 @@ func renderDocsPage(baseURL string) string {
   <a href="#message">Kirim Pesan</a>
   <a href="#webhook">Webhook</a>
   <a href="#errors">Error</a>
+  <a href="#fullapi">API Lengkap</a>
 </nav>
 <main>
 
@@ -370,6 +371,22 @@ func renderDocsPage(baseURL string) string {
   </table>
 </section>
 
+<section id="fullapi">
+  <h2>API Lengkap (50+ endpoint)</h2>
+  <p>Semua endpoint whatsmeow tersedia via REST. Daftar lengkap:</p>
+  <pre>curl -H "X-API-Key: KEY" %s/api/endpoints</pre>
+  <h3>Kategori</h3>
+  <ul>
+    <li><strong>Pesan:</strong> text, image, video, audio, document, sticker, location, contact, poll, reaction, revoke, edit</li>
+    <li><strong>Grup:</strong> list, info, create, join, participants, invite, name, description, photo</li>
+    <li><strong>User:</strong> check, info, profile-picture, blocklist, privacy, devices</li>
+    <li><strong>Presence:</strong> online/offline, typing, subscribe</li>
+    <li><strong>Chat:</strong> mark read, mute, archive, pin</li>
+    <li><strong>Media:</strong> download</li>
+    <li><strong>Newsletter:</strong> list, follow, messages, mute</li>
+  </ul>
+</section>
+
 </main>
 </div>
 <footer>WhatsMeow Gateway &copy; %d — <a href="/health">Health Check</a></footer>
@@ -377,7 +394,7 @@ func renderDocsPage(baseURL string) string {
 </html>`,
 		baseURL,
 		baseURL, baseURL, baseURL, baseURL, baseURL, baseURL,
-		baseURL, baseURL, baseURL, baseURL,
+		baseURL, baseURL, baseURL, baseURL, baseURL, baseURL,
 		year,
 	)
 }
