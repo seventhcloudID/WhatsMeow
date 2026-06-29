@@ -14,62 +14,62 @@ import (
 )
 
 type TextOpts struct {
-	To       string
-	Text     string
-	ReplyTo  string // message ID
-	ReplyJID string // chat JID for reply context
+	To       string `json:"to"`
+	Text     string `json:"text"`
+	ReplyTo  string `json:"reply_to"`  // message ID
+	ReplyJID string `json:"reply_jid"` // chat JID for reply context
 }
 
 type LocationOpts struct {
-	To        string
-	Latitude  float64
-	Longitude float64
-	Name      string
-	Address   string
+	To        string  `json:"to"`
+	Latitude  float64 `json:"latitude"`
+	Longitude float64 `json:"longitude"`
+	Name      string  `json:"name"`
+	Address   string  `json:"address"`
 }
 
 type ContactOpts struct {
-	To          string
-	DisplayName string
-	VCard       string
+	To          string `json:"to"`
+	DisplayName string `json:"display_name"`
+	VCard       string `json:"vcard"`
 }
 
 type PollOpts struct {
-	To                    string
-	Name                  string
-	Options               []string
-	SelectableOptionCount int
+	To                    string   `json:"to"`
+	Name                  string   `json:"name"`
+	Options               []string `json:"options"`
+	SelectableOptionCount int      `json:"selectable_option_count"`
 }
 
 type PollVoteOpts struct {
-	Chat      string
-	Sender    string
-	MessageID string
-	Options   []string
+	Chat      string   `json:"chat"`
+	Sender    string   `json:"sender"`
+	MessageID string   `json:"message_id"`
+	Options   []string `json:"options"`
 }
 
 type ReactionOpts struct {
-	To        string
-	MessageID string
-	Sender    string // required for groups
-	Emoji     string
+	To        string `json:"to"`
+	MessageID string `json:"message_id"`
+	Sender    string `json:"sender"` // required for groups
+	Emoji     string `json:"emoji"`
 }
 
 type RevokeOpts struct {
-	To        string
-	MessageID string
-	Sender    string
+	To        string `json:"to"`
+	MessageID string `json:"message_id"`
+	Sender    string `json:"sender"`
 }
 
 type EditOpts struct {
-	To        string
-	MessageID string
-	Text      string
+	To        string `json:"to"`
+	MessageID string `json:"message_id"`
+	Text      string `json:"text"`
 }
 
 type DisappearingOpts struct {
-	To     string
-	Timer  time.Duration
+	To    string        `json:"to"`
+	Timer time.Duration `json:"timer"`
 }
 
 func (m *Manager) SendText(ctx context.Context, to, text string) (*SendResult, error) {
